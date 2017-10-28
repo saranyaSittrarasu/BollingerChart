@@ -1,0 +1,406 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title></title>
+    <meta charset="utf-8" />
+    <style>
+        #dvStock {
+            border: 1px solid black;
+            position: absolute;
+            width: 400px;
+            height: auto;
+            left: 50%;
+            font-size: 12px;
+        }
+
+        input[type=radio] {
+            width: 15px;
+            height: 1em;
+        }
+
+        h2 {
+            text-align: center;
+        }
+
+        .dvRadio {
+            font-size: 20px;
+            text-align: center;
+        }
+
+        #dvChart1 {
+            position: absolute;
+            top: 10%;
+        }
+
+        #dvChart2 {
+            position: absolute;
+            top: 50%;
+        }
+
+        html, body {
+            font: 12px sans-serif;
+            overflow: auto;
+            width: 100px;
+            height: auto;
+        }
+
+        .axis path,
+        .axis line {
+            fill: none;
+            stroke: #999;
+            shape-rendering: crispEdges;
+        }
+
+        .line {
+            fill: none;
+            stroke: #6060ae;
+            stroke-width: 1.5px;
+        }
+
+        .upper.line.bands {
+            stroke: #bcc1e2;
+            stroke-opacity: 1.5;
+        }
+
+        .lower.line.bands {
+            stroke: #b7bce5;
+            stroke-opacity: 1.5;
+        }
+
+        .line.ma.bands {
+            stroke: #b862ac;
+            stroke-opacity: 1.5;
+        }
+
+        .area.bands {
+            fill: #F5F5DC;
+            fill-opacity: 0.3;
+            stroke: none;
+        }
+
+        .line2 {
+            height: 100px;
+            position: fixed;
+        }
+
+        .legend rect {
+            fill: white;
+            stroke: black;
+            opacity: 0.8;
+            position: absolute;
+            margin-right: 20px;
+        }
+    </style>
+
+</head>
+<body>
+
+    <div id="dvStock">
+        <h2>Stock Chart</h2>
+        <div class="dvRadio">
+            <input type="radio" id="rdStock" name="stock" onclick="checkValue(this.value)" value="osl" checked="checked">Oslo &nbsp;&nbsp;
+            <input type="radio" id="rdStock" name="stock" onclick="checkValue(this.value)" value="stl">Stockholm<br>
+        </div>
+    </div>
+    <div id="dvChart1"></div>
+
+    <div id="dvChart2"></div>
+
+    <script src="http://d3js.org/d3.v3.js"></script>
+    <!--<script src="d3.legend.js"></script>-->
+    <script>
+        var radios = document.getElementById("rdStock").value;
+        checkValue(radios);
+        function checkValue(value) {
+            var jsonCall = (value == 'osl' ? 'Oslo_STL' : 'Stockholm_ABB') + '.json';
+            getDataSet("data/" + jsonCall, function (dataSet) {
+                loadChart(JSON.parse(dataSet));
+            });
+
+            function getDataSet(url, callback) {
+                var xhr = new XMLHttpRequest();
+                xhr.open('GET', url);
+                xhr.onload = function () {
+                    if (xhr.status == 200) {
+                        callback(xhr.responseText);
+                    } else {
+                        callback(null);
+                    }
+                };
+                xhr.send();
+            }
+        }
+        function loadChart(data) {
+            d3.select("#dvChart1").selectAll("svg").remove();
+            d3.select("#dvChart2").selectAll("svg").remove();
+
+            var margin = { top: 30, right: 20, bottom: 30, left: 50 },
+	width = 800 - margin.left - margin.right,
+	height = 340 - margin.top - margin.bottom;
+
+            var n = 20; // n-period of moving average
+            var k = 2;  // k times n-period standard deviation above/below moving average
+
+            // Parse the date / time
+            var parseDate = d3.time.format("%m/%d/%Y").parse;
+
+            // Set the ranges
+            var x = d3.time.scale()
+                    .range([0, width]);
+            var y = d3.scale.linear()
+                    .range([height, 0]);
+
+            // Define the axes
+            var xAxis = d3.svg.axis()
+                    .scale(x)
+                    .orient("bottom");
+            var yAxis = d3.svg.axis()
+                    .scale(y)
+                    .orient("left")
+                    .tickSize(3, 0);
+
+            // Define the line
+            var line = d3.svg.line()
+                    .x(function (d) { return x(d.date); })
+                    .y(function (d) { return y(d.close); });
+            var ma = d3.svg.line()
+                    .x(function (d) { return x(d.date); })
+                    .y(function (d) { return y(d.ma); });
+            var lowBand = d3.svg.line()
+                    .x(function (d) { return x(d.date); })
+                    .y(function (d) { return y(d.low); });
+            var highBand = d3.svg.line()
+                    .x(function (d) { return x(d.date); })
+                    .y(function (d) { return y(d.high); });
+            var bandsArea = d3.svg.area()
+                    .x(function (d) { return x(d.date); })
+                    .y0(function (d) { return y(d.low); })
+                    .y1(function (d) { return y(d.high); });
+
+
+            // Adds the svg canvas
+            var svg = d3.select("#dvChart1").append("svg")
+                 	.attr("width", width + margin.left + margin.right)
+		.attr("height", height + margin.top + margin.bottom);
+            var focus = svg.append("g")
+           .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+            //    d3.json("./data/" + jsonCall, function (error, data) {
+            data.forEach(function (d) {
+                var date1 = new Date(d.date);
+                var date2 = ((date1.getMonth() + 1) + '/' + date1.getDate() + '/' + date1.getFullYear());
+                d.date = parseDate(date2);
+                d.close = parseInt(+d.last);
+            });
+            var bandsData = getBollingerBands(n, k, data);
+            // Scale the range of the data
+            x.domain(d3.extent(data, function (d) { return d.date; }));
+            y.domain([d3.min(bandsData, function (d) { return d.low; }),
+                       d3.max(bandsData, function (d) { return d.high; })]);
+            // Add the valueline path.
+            focus.append("path")
+                    .datum(bandsData)
+                    .attr("class", "area bands")
+                .attr("data-legend", "Area between Upper and Lower Band")
+                    .attr("d", bandsArea);
+            focus.append("path")
+                    .datum(bandsData)
+                    .attr("class", "lower line bands")
+                 .attr("data-legend", "Lower Band")
+                    .attr("d", lowBand);
+            focus.append("path")
+                    .datum(bandsData)
+                    .attr("class", "upper line bands")
+                  .attr("data-legend", "Upper Band")
+                    .attr("d", highBand);
+            focus.append("path")
+                    .datum(bandsData)
+                    .attr("class", "line ma bands")
+                  .attr("data-legend", "Moving Average")
+                    .attr("d", ma);
+            focus.append("path")
+                    .datum(data)
+                    .attr("class", "line")
+                    .attr("data-legend", "Actual Value")
+                    .attr("d", line);
+            // Add the X Axis
+            focus.append("g")
+                   .attr("class", "x axis")
+                   .attr("transform", "translate(0," + height + ")")
+                   .call(xAxis);
+            // Add the Y Axis
+            focus.append("g")
+                    .attr("class", "y axis")
+             //  .attr("transform", "translate(40,0)")
+                    .call(yAxis);
+
+            // Add the legend
+            legend = svg.append("g")
+              .attr("class", "legend")
+                .attr("x", 0)
+              .attr("y", 9)
+              .attr("dy", ".35em")
+                .attr("transform", "translate(" + width - margin.right + "," + margin.top + ")")
+              .attr("transform", "translate(350,20)")
+              .style("font-size", "12px")
+              .call(d3.legend)
+            //     });
+
+            // Get Bollinger Values
+            function getBollingerBands(n, k, data) {
+                var bands = []; //{ ma: 0, low: 0, high: 0 }
+                for (var i = n, len = data.length; i <= len; i++) {
+                    var slice = data.slice(i - n, i);
+                    var mean = d3.mean(slice, function (d) { return d.close; });
+                    var stdDev = Math.sqrt(d3.mean(slice.map(function (d) {
+                        return Math.pow(d.close - mean, 2);
+                    })));
+                    bands.push({
+                        date: data[i - 1].date,
+                        ma: mean,
+                        low: mean - (k * stdDev),
+                        high: mean + (k * stdDev)
+                    });
+                }
+                return bands;
+            }
+
+            var m = 14; //RSI n-period
+            /* RSI graph line pointing */
+
+            // Define the line for Chart2
+            var line2 = d3.svg.line()
+            .x(function (d1) { return x(d1.rsidate); })
+            .y(function (d1) { return y(d1.RSI); });
+
+            // Adds the svg canvas for Chart2
+            var chart2 = d3.select("#dvChart2").append("svg")
+               .attr("width", width + margin.left + margin.right)
+		       .attr("height", height + margin.top + margin.bottom)
+               .append("g")
+               .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+            var rsiData = getRSIData(m, data);
+            // Scale the range of the data
+            x.domain(d3.extent(data, function (d1) { return d1.date; }));
+            y.domain([0, d3.max(rsiData, function (d1) {
+                return Math.max(d1.RSI);
+            })]);
+            // Add the X Axis
+            chart2.append("g")
+                   .attr("class", "x axis")
+                .attr("transform", "translate(0," + height + ")")
+                   .call(xAxis)
+            // Add the Y Axis
+            chart2.append("g")
+                     .attr("class", "y axis")
+                     .call(yAxis);
+            // Add the Line path
+            chart2.append("path")
+                   .datum(rsiData)
+                   .attr("fill", "none")
+                   .attr("stroke", "steelblue")
+                   .attr("stroke-linejoin", "round")
+                   .attr("stroke-linecap", "round")
+                   .attr("stroke-width", 1.5)
+                        .attr("data-legend", "RSI value")
+                   .attr("d", line2);
+            chart2.append("text")
+        .attr("x", (width / 2))
+        .attr("y", 305)
+        .attr("text-anchor", "middle")
+        .style("font-size", "16px")
+                .style("stroke", "steelblue")
+        .text("RSI Chart");
+
+            function getRSIData(m, data) {
+                for (var j = 1; j < data.length; j++) {
+                    var RSIChange = (parseFloat(data[j].last) - parseFloat(data[j - 1].last)).toFixed(2);
+                    data[j] = {
+                        date: data[j].date,
+                        last: data[j].last,
+                        close: data[j].close,
+                        change: parseFloat(RSIChange),
+                        gain: RSIChange > 0 ? parseFloat(RSIChange) : 0,
+                        loss: RSIChange < 0 ? Math.abs(RSIChange) : 0
+                    }
+                }
+
+                var RSIband = [], AvgGain = 0, AvgLoss = 0;
+                for (var k = m + 1, RSIlen = data.length; k <= RSIlen; k++) {
+                    var RSIslice = data.slice(k - m, k);
+                    if (k - m == 1) {
+                        AvgGain = d3.mean(RSIslice, function (d) { return d.gain; });
+                        AvgLoss = d3.mean(RSIslice, function (d) { return d.loss; });
+                    }
+                    else {
+                        AvgLoss = ((AvgLoss * 13) + data[k - 1].loss) / m;
+                        AvgGain = ((AvgGain * 13) + data[k - 1].gain) / m;
+                    }
+                    var RS = AvgGain / AvgLoss;
+                    RSIband.push({
+                        rsidate: data[k - 1].date,
+                        avgGain: AvgGain,
+                        avgLoss: AvgLoss,
+                        RSI: 100.0 - (100.0 / (1 + RS))
+                    });
+                }
+                return RSIband;
+            }
+        }
+
+        // Legend Script
+        (function () {
+            d3.legend = function (g) {
+                g.each(function () {
+                    var g = d3.select(this),
+                        items = {},
+                        svg = d3.select(g.property("nearestViewportElement")),
+                        legendPadding = g.attr("data-style-padding") || 5,
+                        lb = g.selectAll(".legend-box").data([true]),
+                        li = g.selectAll(".legend-items").data([true])
+
+                    lb.enter().append("rect").classed("legend-box", true)
+                    li.enter().append("g").classed("legend-items", true)
+
+                    svg.selectAll("[data-legend]").each(function () {
+                        var self = d3.select(this)
+                        items[self.attr("data-legend")] = {
+                            pos: self.attr("data-legend-pos") || this.getBBox().y,
+                            color: self.attr("data-legend-color") != undefined ? self.attr("data-legend-color") : self.style("fill") != 'none' ? self.style("fill") : self.style("stroke")
+                        }
+                    })
+
+                    items = d3.entries(items).sort(function (a, b) { return a.value.pos - b.value.pos })
+
+
+                    li.selectAll("text")
+                        .data(items, function (d) { return d.key })
+                        .call(function (d) { d.enter().append("text") })
+                        .call(function (d) { d.exit().remove() })
+                        .attr("y", function (d, i) { return i + "em" })
+                        .attr("x", "1em")
+                        .text(function (d) {; return d.key })
+
+                    li.selectAll("circle")
+                        .data(items, function (d) { return d.key })
+                        .call(function (d) { d.enter().append("circle") })
+                        .call(function (d) { d.exit().remove() })
+                        .attr("cy", function (d, i) { return i - 0.25 + "em" })
+                        .attr("cx", 0)
+                        .attr("r", "0.4em")
+                        .style("fill", function (d) { console.log(d.value.color); return d.value.color })
+
+                    // Reposition and resize the box
+                    var lbbox = li[0][0].getBBox()
+                    lb.attr("x", (lbbox.x - legendPadding))
+                        .attr("y", (lbbox.y - legendPadding))
+                        .attr("height", (lbbox.height + 2 * legendPadding))
+                        .attr("width", (lbbox.width + 2 * legendPadding))
+                })
+                return g
+            }
+        })()
+    </script>
+</body>
+</html>
